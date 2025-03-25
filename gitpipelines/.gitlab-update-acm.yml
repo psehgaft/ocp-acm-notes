@@ -1,0 +1,74 @@
+stages:
+  - precheck
+  - backup
+  - upgrade
+  - verify
+  - audit
+
+variables:
+  KUBECONFIG: "$CI_PROJECT_DIR/kubeconfig"
+  RHACM_SOURCE_VERSION: "2.10"
+  RHACM_TARGET_VERSION: "2.13"
+  RHACM_CHANNEL: "release-2.13"
+  ACM_NAMESPACE: "open-cluster-management"
+
+before_script:
+  - echo "Using OpenShift CLI version:"
+  - oc version
+  - echo "Upgrading RHACM from version $RHACM_SOURCE_VERSION to $RHACM_TARGET_VERSION"
+
+precheck:
+  stage: precheck
+  script:
+    - echo "Checking OpenShift version compatibility..."
+    - oc version
+    - echo "Verifying access to OperatorHub..."
+    - oc get catalogsource -n openshift-marketplace
+
+backup:
+  stage: backup
+  script:
+    - echo "Backing up ManagedClusters and Policies..."
+    - oc get managedclusters -o yaml > managedclusters-backup.yaml
+    - oc get policies --all-namespaces -o yaml > policies-backup.yaml
+    - echo "Backing up CRDs and MultiClusterHub config..."
+    - oc get crd -o yaml > crds-backup.yaml
+    - oc get multiclusterhub -n $ACM_NAMESPACE -o yaml > mch-pre-upgrade.yaml
+  artifacts:
+    paths:
+      - managedclusters-backup.yaml
+      - policies-backup.yaml
+      - crds-backup.yaml
+      - mch-pre-upgrade.yaml
+
+upgrade:
+  stage: upgrade
+  script:
+    - echo "Updating subscription channel to $RHACM_CHANNEL..."
+    - oc patch subscription advanced-cluster-management -n $ACM_NAMESPACE --type merge -p "{\"spec\":{\"channel\":\"$RHACM_CHANNEL\"}}"
+    - echo "Waiting for the operator upgrade to complete..."
+    - sleep 60
+    - oc get csv -n $ACM_NAMESPACE
+
+verify:
+  stage: verify
+  script:
+    - echo "Verifying component health..."
+    - oc get pods -n $ACM_NAMESPACE
+    - oc get mch -n $ACM_NAMESPACE
+    - echo "Validating ManagedClusters status..."
+    - oc get managedclusters
+
+audit:
+  stage: audit
+  script:
+    - echo "Checking RBAC and CRD changes..."
+    - oc get roles,rolebindings,clusterroles,clusterrolebindings -A | grep $ACM_NAMESPACE || true
+    - oc get crd -o yaml > crds-post-upgrade.yaml
+    - oc get multiclusterhub -n $ACM_NAMESPACE -o yaml > mch-post-upgrade.yaml
+    - oc get events -n $ACM_NAMESPACE --sort-by=.lastTimestamp
+    - oc get all -n $ACM_NAMESPACE --sort-by=.metadata.creationTimestamp
+  artifacts:
+    paths:
+      - crds-post-upgrade.yaml
+      - mch-post-upgrade.yaml
