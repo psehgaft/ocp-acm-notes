@@ -1,101 +1,101 @@
-# ocp-acm-notes
-# Commands for install ACM
+# ACM + Assisted Installer: YAML Pack (GitOps-friendly)
 
-Create project
+This pack provides **declarative YAML** to provision an OpenShift cluster with **Red Hat Advanced Cluster Management (ACM)** using the **Assisted Installer** (via Hive/MCE CRDs). It includes:
+- `AgentClusterInstall`, `ClusterDeployment`, `InfraEnv`, `NMStateConfig`, and (optional) `ClusterImageSet`
+- Post-install **ManagedCluster** and **KlusterletAddonConfig** for enabling ACM add-ons
+- A `variables.yaml` to keep parameters in one place and a `render.sh` to generate ready-to-apply manifests
 
-'oc create namespace [cloudname]-[clustername]'
+> Tested with OCP **4.18** and ACM/MCE **2.11+**. Adjust the `releaseImage` or `clusterImageSetName` as needed.
 
-# ACM Commands
+## Prerequisites
 
-Retrieve the currently available managed clusters
+1. A running **hub** cluster with **ACM/MCE** installed.
+2. **Hive** and **Assisted Service** are provided by MCE on the hub.
+3. DNS records and VIPs for the target cluster:
+   - `api.<clusterName>.<baseDomain>` → **apiVIP**
+   - `*.apps.<clusterName>.<baseDomain>` → **ingressVIP**
+4. Workstation with `oc`, `yq` and `jq`, and `envsubst`.
+5. Pull secret from Red Hat Hybrid Cloud Console.
+6. Static IPs: MAC addresses and addresses for each host, or use DHCP if preferred.
 
-'oc get managedclusters'
+## Files
 
-
-Retrieve the properties of [cluster]
-
-'oc get managedcluster [cluster] -o yaml'
-
-# Hibernate Cluster
-
-Not all OpenShift clusters need to run continuously. For example, development clusters are probably not used during the night. Therefore, it makes sense to hibernate these clusters during off hours to save on cloud hosting costs.
-
-# Start Clusters
-
-Once you are ready to use your hibernated clusters again, you can restart them.
-
-# Get Cluster Information
-
-Every cluster, both imported and deployed from RHACM, has its own dashboard with information about the cluster. The useful information you can retrieve directly from the RHACM cluster properties page includes the cluster resource name, cluster API address, console URL, and the username and password.
-
-You can also see the cluster status, distribution version, channel, and labels.
-
-. On your bastion host, check the status of your managed clusters:
-
-'oc get managedclusters'
-
-. Retrieve the secrets for your managed cluster (you are only interested in the secrets whose names start with the name of your cluster):
-
-'oc get secrets -n [namespace == cluster-name] | grep [cluster-name]'
-
-. Retrieve the install-config.yaml file for your cluster:
-
-'oc get secret [cluster-name]-install-config -n [namespace] -o yaml'
-
-.. Note that the install-config.yaml file is base64 encoded. Retrieve only the content of the install-config.yaml file and decode it:
-
-' oc get secret sno-${GUID}-install-config -n sno-${GUID} -o yaml -o jsonpath='{.data.install-config\.yaml}' | base64 -d '
-
-# Confirm Autoscaler Readiness
-
-'oc login --insecure-skip-tls-verify=true -u kubeadmin -p <password> https://api.[namespace]-[subdomain].[Domain]'
-
-Verify that the cluster autoscaler was created on the managed cluster:
-
-'oc get clusterautoscaler'
-
-The cluster autoscaler works by using MachineAutoscaler resources to scale the MachineSet resources in the openshift-machine-api namespace.
-Verify that you have machine autoscalers available:
-
-'oc get machineautoscaler -n openshift-machine-api'
-
-## Test Cluster Autoscaler
-
-. Create a new project to hold your workload:
-
-'oc new-project work-queue'
-
-. Create a job to create 150 Pods in that project. Select 2Gi for the requested memory and 2 whole CPUs for each of the containers in the Pod. This causes the cluster autoscaler to trigger the creation of additional nodes:
-
-```yaml
-echo 'apiVersion: batch/v1
-kind: Job
-metadata:
-  generateName: work-queue-
-spec:
-  template:
-    spec:
-      containers:
-      - name: work
-        image: busybox
-        command: ["sleep",  "300"]
-        resources:
-          requests:
-            memory: 2Gi
-            cpu: 2
-      restartPolicy: Never
-  parallelism: 50
-  completions: 150' | oc create -f - -n work-queue
+```
+templates/
+  00-namespace.yaml
+  01-clusterimageset.yaml
+  03-agentclusterinstall.yaml
+  04-clusterdeployment.yaml
+  05-infraenv.yaml
+  06-nmstateconfigs.yaml   # rendered per host
+  07-managedcluster.yaml
+  08-klusterletaddonconfig.yaml
+variables.example.yaml
+variables.yaml            # you create this from the example
+render.sh                 # renders into rendered/
 ```
 
-. After a few seconds, verify that the first machine set scaled to make space for new workloads:
+## Quick start
 
-'oc get machineset -n openshift-machine-api'
+```bash
+# 1) Download this repo (or unzip the artifact)
+# 2) Create and edit your variables
+cp variables.example.yaml variables.yaml
+$EDITOR variables.yaml
 
-. Verify that the machines were created:
+# 3) Render templates from variables (requires yq, jq, envsubst)
+./render.sh
 
-'oc get machines -n openshift-machine-api'
+# 4) Apply in order
+oc apply -f rendered/00-namespace.yaml
+oc apply -f rendered/01-clusterimageset.yaml   # skip if the image set already exists
+oc apply -f rendered/04-clusterdeployment.yaml
+oc apply -f rendered/03-agentclusterinstall.yaml
+oc apply -f rendered/05-infraenv.yaml
+oc apply -f rendered/06-nmstateconfigs.yaml
+# Download the discovery ISO URL from the InfraEnv status, boot hosts, and wait for agents to appear.
+# Then the install will proceed when requirements are met.
 
-. Verify that the nodes were created:
+# 5) (Optional) Enable ACM add-ons after cluster registers
+oc apply -f rendered/07-managedcluster.yaml
+oc apply -f rendered/08-klusterletaddonconfig.yaml
+```
 
-'oc get nodes'
+### Get the Discovery ISO
+
+After applying `InfraEnv`, retrieve the ISO URL:
+
+```bash
+oc get infraenv ${clusterName} -n ${namespace} -o jsonpath='{.status.isoDownloadURL}{"\n"}'
+```
+
+Boot each host from that ISO. When agents show up in the AgentClusterInstall status, installation will begin once minimum agent counts are satisfied.
+
+## Notes and tips
+
+- **ImageSet vs Release image**: This pack uses `ClusterImageSet` by name. Alternatively set `RELEASE_IMAGE` env var before `./render.sh` to override.
+- **Proxy**: Fill the `proxy` section in `variables.yaml`; it is templated into `InfraEnv`.
+- **User-managed networking**: The default is false (VIPs via L2). For VLAN or other topologies see official docs.
+- **Static IPs**: We use `NMStateConfig` with MAC-based matching. DHCP is also supported; remove NMState if using DHCP.
+- **Auto import to ACM**: When using MCE/ACM Assisted Installer, clusters are auto-imported once Ready. The provided `ManagedCluster`/`KlusterletAddonConfig` are helpful if you want to toggle add-ons declaratively.
+
+## Clean-up
+
+```bash
+oc delete clusterdeployment ${clusterName} -n ${namespace} --wait=false
+oc delete namespace ${namespace}
+```
+
+## References (APA)
+
+- Red Hat. (2024). *Red Hat Advanced Cluster Management for Kubernetes 2.11 — Install and manage clusters.* Retrieved from https://docs.redhat.com/ …  
+
+- Red Hat. (2024). *Installing a cluster with customizations using the Agent-based Installer (OCP 4.17/4.18).* Retrieved from https://docs.redhat.com/ …  
+
+- Red Hat. (2024). *Managed cluster klusterlet advanced configuration.* Retrieved from https://docs.redhat.com/ …  
+
+- Open Cluster Management. (2022). *ManagedCluster concept.* Retrieved from https://open-cluster-management.io/docs/concepts/managedcluster/ 
+
+- OpenShift Hive. (n.d.). *Using Hive and ClusterDeployment.* Retrieved from https://github.com/openshift/hive/blob/master/docs/using-hive.md
+
+> See the main chat response for direct links.

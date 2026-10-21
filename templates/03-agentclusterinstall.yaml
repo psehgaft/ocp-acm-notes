@@ -1,0 +1,28 @@
+apiVersion: extensions.hive.openshift.io/v1beta1
+kind: AgentClusterInstall
+metadata:
+  name: ${clusterName}
+  namespace: ${namespace}
+spec:
+  clusterDeploymentRef:
+    name: ${clusterName}
+  imageSetRef:
+    name: ${clusterImageSetName}
+  networking:
+    clusterNetwork:
+      - cidr: ${clusterNetworkCIDR}
+        hostPrefix: ${hostPrefix}
+    serviceNetwork:
+      - ${serviceNetworkCIDR}
+    machineNetwork:
+      - cidr: ${machineNetworkCIDR}
+    userManagedNetworking: false
+    apiVIP: ${apiVIP}
+    ingressVIP: ${ingressVIP}
+  provisionRequirements:
+    controlPlaneAgents: 3
+    workerAgents: 1
+  sshPublicKey: ${sshPublicKey}
+  holdInstallation: false
+  additionalNTPSources: [${ntpSources_csv}]
+  installConfigOverrides: ${installConfigOverrides_json}

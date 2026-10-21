@@ -1,0 +1,22 @@
+apiVersion: agent-install.openshift.io/v1beta1
+kind: InfraEnv
+metadata:
+  name: ${clusterName}
+  namespace: ${namespace}
+  labels:
+    cluster-name: ${clusterName}
+spec:
+  nmStateConfigLabelSelector:
+    matchLabels:
+      cluster-name: ${clusterName}
+  pullSecretRef:
+    name: ${clusterName}-pull-secret
+  sshAuthorizedKey: ${sshPublicKey}
+  agentLabels:
+    cluster-name: ${clusterName}
+  # Optional: mirror registry or proxy
+  proxy:
+${proxy_block}
+  additionalNTPSources: [${ntpSources_csv}]
+  # Use imageType: minimal-iso for vSphere; full-iso for bare metal if needed
+  isoType: minimal-iso

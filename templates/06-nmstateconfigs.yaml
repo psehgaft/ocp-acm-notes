@@ -1,0 +1,28 @@
+# One NMStateConfig per host
+apiVersion: agent-install.openshift.io/v1beta1
+kind: NMStateConfig
+metadata:
+  name: ${clusterName}-${hostname}
+  namespace: ${namespace}
+  labels:
+    cluster-name: ${clusterName}
+spec:
+  config:
+    interfaces:
+      - name: ${ifname}
+        mac-address: ${mac}
+        type: ethernet
+        state: up
+        ipv4:
+          enabled: true
+          address:
+            - ip: ${ip}
+              prefix-length: ${prefixLength}
+          gateway: ${gateway}
+          dns-resolver:
+            config:
+              server:
+${dns_block}
+  interfaces:
+    - name: ${ifname}
+      macAddress: ${mac}

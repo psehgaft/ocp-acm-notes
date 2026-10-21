@@ -1,0 +1,31 @@
+apiVersion: hive.openshift.io/v1
+kind: ClusterDeployment
+metadata:
+  name: ${clusterName}
+  namespace: ${namespace}
+  labels:
+    cloud: BareMetal
+    region: local
+spec:
+  baseDomain: ${baseDomain}
+  clusterName: ${clusterName}
+  clusterInstallRef:
+    group: extensions.hive.openshift.io
+    kind: AgentClusterInstall
+    name: ${clusterName}
+    version: v1beta1
+  platform:
+    agentBareMetal:
+      agentSelector:
+        matchLabels:
+          cluster-name: ${clusterName}
+  pullSecretRef:
+    name: ${clusterName}-pull-secret
+  installed: false
+  provisioning:
+    imageSetRef:
+      name: ${clusterImageSetName}
+  preserveOnDelete: false
+  controlPlaneConfig:
+    servingCertificates: {}
+  # ManagedCluster auto-import is handled by MCE/ACM when the cluster becomes Ready.

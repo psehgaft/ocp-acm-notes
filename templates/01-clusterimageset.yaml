@@ -1,0 +1,7 @@
+apiVersion: hive.openshift.io/v1
+kind: ClusterImageSet
+metadata:
+  name: ${clusterImageSetName}
+spec:
+  releaseImage: ${releaseImage}
+# NOTE: If the ClusterImageSet already exists on the hub, skip creating this file.
